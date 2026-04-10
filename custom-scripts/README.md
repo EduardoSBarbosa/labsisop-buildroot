@@ -16,6 +16,17 @@ The server listens on port 8080.
 
 ## Execution
 
+To run the code add the folder custom-scripts with the files on the root directory os labsisop, also is needed to pass ta file .config to lassbsispo root directory
+
+code to start QUEMU
+
+sudo qemu-system-i386 --device e1000,netdev=eth0,mac=aa:bb:cc:dd:ee:ff    
+                     --netdev tap,id=eth0,script=custom-scripts/qemu-ifup    
+                     --kernel output/images/bzImage  
+                     --hda output/images/rootfs.ext2 
+                     --nographic     
+                     --append "console=ttyS0 root=/dev/sda"
+
 After boot:
 
 http://<target-ip>:8080/status
@@ -85,7 +96,7 @@ curl http://192.168.1.10:8080/status
   Cached
 # Calculation:
   used = total - free - buffers - cached
-
+  
 ### OS Version
 /proc/version
 
