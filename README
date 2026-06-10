@@ -24,3 +24,110 @@ You can also find us on #buildroot on OFTC IRC.
 
 If you would like to contribute patches, please read
 https://buildroot.org/manual.html#submitting-patches
+
+
+
+# SchedProfiler - Analisador de Escalonamento do Kernel Linux
+
+**Componentes:** Eduardo Barbosa e Max Breuel 
+**Disciplina:** Laboratório de Sistemas Operacionais (CC)  
+**Contexto:** Trabalho Prático 3 (TP3) - Políticas de Escalonamento e Ftrace  
+
+---
+
+## 1. Descrição do Programa
+
+O `sched_profiler` é uma aplicação multithread desenvolvida em C (User Space) com o objetivo de analisar e perfilar o comportamento do escalonador do Kernel Linux sob diferentes políticas de tempo real e convencionais. 
+
+A aplicação aloca dinamicamente um buffer global de caracteres e cria um número de threads especificado pelo usuário. O ponteiro de escrita deste buffer é compartilhado e incrementado globalmente. Cada thread recebe um identificador único em formato de caractere (`A`, `B`, `C`, `D`...) e tenta preencher continuamente o buffer com seu caractere. O acesso concorrente ao ponteiro global e ao buffer é rigidamente sincronizado por meio de um semáforo binário (`sem_t`).
+
+### Pós-processamento e Métricas
+Ao término do preenchimento do buffer, o programa realiza duas análises estatísticas:
+1. **Buffer Compactado:** Reduz repetições consecutivas de caracteres idênticos a uma única ocorrência, evidenciando graficamente a alternância ou a dominância das tarefas na CPU (ex: `AAAAABBBCCCC` vira `ABC`).
+2. **Contagem de Escalonamento:** Computa quantas vezes cada thread conseguiu obter o semáforo e ser ativada na CPU, permitindo avaliar o nível de concorrência e justiça do algoritmo de escalonamento.
+
+---
+
+## 2. Parâmetros e Compilação
+
+### Compilação Cruzada (Target)
+Para rodar dentro do ambiente emulado (QEMU), o binário foi cross-compilado utilizando a toolchain do Buildroot:
+```bash
+i686-buildroot-linux-gnu-gcc -pthread sched_profiler.c -o sched_profiler
+```
+Para restringir a execução física a um único core dentro do ambiente embarcado do QEMU, inclui-se o parâmetro smp:
+
+```bash
+--smp cpus=1 
+```
+
+## 3. Captura de Traces com Ftrace
+Para registrar os eventos brutos de troca de contexto no Kernel Space do target através do trace-cmd:
+
+```bash
+trace-cmd record -e sched:sched_switch ./sched_profiler 50000 4 <POLITICA>
+```
+Inicialização do Gerenciador Gráfico no Codespace
+Iniciar Servidor VNC/noVNC:
+
+```bash
+curl -fsSL [https://gist.githubusercontent.com/miguelxvr/3c123ef67611652af9d2e45eccb8fc0a/raw/](https://gist.githubusercontent.com/miguelxvr/3c123ef67611652af9d2e45eccb8fc0a/raw/) | bash -s -- start
+```
+Parar Servidor VNC/noVNC:
+
+```bash
+curl -fsSL [https://gist.githubusercontent.com/miguelxvr/3c123ef67611652af9d2e45eccb8fc0a/raw/](https://gist.githubusercontent.com/miguelxvr/3c123ef67611652af9d2e45eccb8fc0a/raw/) | bash -s -- stop
+```
+## 4. Referências Técnicas
+Documentação Oficial das Políticas de Escalonamento da API POSIX: man7.org - pthread_setschedparam
+
+Código de Exemplo para Configuração de Prioridades: GitHub - miguelxvr/setpriority
+
+## 5. Exemplos de Execução e Saídas do Programa
+Parâmetros de Entrada Utilizados:
+Tamanho do Buffer: 50000
+
+Número de Threads: 4
+
+### 5.1. Política: SCHED_FIFO (Tempo Real - Sem Preempção)
+Saída Compactada pós-processamento: ABCD
+
+Métricas de Escalonamento:
+
+Thread A = 1
+
+Thread B = 1
+
+Thread C = 1
+
+Thread D = 1
+
+Discussão Técnica: No SCHED_FIFO, por ser uma política de tempo real sem divisão de tempo, a thread que obtém o processador executa continuamente até esgotar sua carga de trabalho ou bloquear no semáforo. Isso resulta em blocos massivos e contínuos de caracteres e uma contagem de escalonamento mínima (igual a 1 por thread).
+
+Visualização Gráfica (KernelShark - FIFO)
+![Gráfico da Política FIFO](doc/print_fifo.png)
+
+### 5.2. Política: SCHED_RR (Tempo Real - Round Robin com Quantum)
+Saída Compactada pós-processamento: ABCDABCDABCDABCD...
+
+Métricas de Escalonamento: Distribuição homogênea e fracionada entre todas as threads (ex: A=120, B=120, C=120, D=120).
+
+Discussão Técnica: O SCHED_RR introduz preempção por fatias de tempo (quantum). Mesmo que a thread queira continuar computando, o temporizador do sistema interrompe sua execução ao fim do ciclo, movendo-a para o fim da fila de prontos e rotacionando as threads de forma justa e cíclica.
+
+Visualização Gráfica (KernelShark - ROUND ROBIN)
+![Gráfico da Política Round Robin](doc/print_rr.png)
+
+### 5.3. Política: SCHED_IDLE (Tarefas de Histórico de Baixa Prioridade)
+Discussão Técnica: Utiliza o algoritmo estrutural do CFS (Completely Fair Scheduler), porém com um peso de prioridade extremamente reduzido. As threads revezam o núcleo de forma similar ao escalonador convencional quando o sistema está ocioso, mas cedem o processador imediatamente diante de qualquer outra demanda do sistema operacional.
+
+Visualização Gráfica (KernelShark - IDLE)
+![Gráfico da Política IDLE](doc/print_idle.png)
+
+### 5.4. Política: SCHED_LOW_IDLE (Política Customizada Modificada no Kernel)
+Discussão Técnica: Validação experimental da modificação realizada diretamente nos fontes do Kernel (core.c, fair.c). O comportamento demonstra que as threads operam sob a menor prioridade absoluta possível do sistema, sofrendo preempções agressivas de tarefas de controle do próprio sistema operacional ou do utilitário de trace.
+
+Visualização Gráfica (KernelShark - LOW IDLE)
+![Gráfico da Política LOW IDLE](doc/print_low_idle.png)
+
+## 6. Conclusão e Entrega
+Este repositório cumpre integralmente os requisitos formais estipulados para a atividade, validando o impacto prático de algoritmos determinísticos de tempo real e de compartilhamento de tempo justo no controle de concorrência multi-segmentada de baixo nível.
